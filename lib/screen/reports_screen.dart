@@ -92,14 +92,20 @@ class ReportsScreen extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           LayoutBuilder(
             builder: (context, constraints) {
-              int cols = 1;
-              double aspectRatio = 1.35;
+              // Smaller cards: more columns per row and a shorter (wider)
+              // aspect ratio so each card takes up noticeably less space.
+              int cols = 2;
+              double aspectRatio = 1.7;
               if (constraints.maxWidth > 1100) {
-                cols = 3;
-                aspectRatio = 1.6;
-              } else if (constraints.maxWidth > 700) {
-                cols = 2;
+                cols = 4;
                 aspectRatio = 1.5;
+              } else if (constraints.maxWidth > 700) {
+                cols = 3;
+                aspectRatio = 1.4;
+              } else if (constraints.maxWidth < 420) {
+                // Very narrow phones: fall back to 1 column so text isn't cramped.
+                cols = 1;
+                aspectRatio = 2.6;
               }
               return GridView.builder(
                 shrinkWrap: true,
@@ -107,8 +113,8 @@ class ReportsScreen extends StatelessWidget {
                 itemCount: reportTemplates.length,
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: cols,
-                  crossAxisSpacing: AppSpacing.md,
-                  mainAxisSpacing: AppSpacing.md,
+                  crossAxisSpacing: AppSpacing.sm,
+                  mainAxisSpacing: AppSpacing.sm,
                   childAspectRatio: aspectRatio,
                 ),
                 itemBuilder: (context, i) => _ReportCard(
@@ -173,8 +179,8 @@ class ReportsScreen extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 44,
-            height: 44,
+            width: 20,
+            height: 20,
             decoration: BoxDecoration(
               color: AppColors.primarySoft,
               borderRadius: BorderRadius.circular(12),
@@ -216,32 +222,35 @@ class _ReportCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SectionCard(
+      padding: const EdgeInsets.all(AppSpacing.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text(report.icon, style: const TextStyle(fontSize: 24)),
-              const SizedBox(width: 10),
+              Text(report.icon, style: const TextStyle(fontSize: 18)),
+              const SizedBox(width: 4),
               Expanded(
                 child: Text(report.title,
-                    style: AppTextStyles.bodyMedium,
+                    style: AppTextStyles.bodyMedium.copyWith(fontSize: 13),
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Expanded(
             child: Text(
               report.description,
-              style: AppTextStyles.caption,
-              maxLines: 3,
+              style: AppTextStyles.caption.copyWith(fontSize: 11),
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           SizedBox(
             width: double.infinity,
+            height: 32,
             child: PrimaryButton(
               label: 'Generate & Export',
               icon: Icons.arrow_forward_rounded,
