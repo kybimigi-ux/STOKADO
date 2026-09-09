@@ -1,5 +1,5 @@
 import "package:flutter/material.dart";
-import "screen/dashboard.dart";
+import "screen/main_layout.dart";
 
 
 void main() {
@@ -11,13 +11,10 @@ class InventoryApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return const MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Inventory App',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: const InventoryDashboard(),
+      home: MainLayoutScreen(),
     );
   }
 }
