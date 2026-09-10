@@ -29,7 +29,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
   late final List<Widget> _screens = [
     DashboardScreen(onNavigatetoTab: setTab),
     const InventoryScreen(),
-    const TransactionScreen(),
+    const TransactionsScreen(),
     const ReportsScreen(),
     const SettingsScreen(),
   ];
