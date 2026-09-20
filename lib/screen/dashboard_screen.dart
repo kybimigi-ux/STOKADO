@@ -1,74 +1,512 @@
-import "package:flutter/material.dart";
-import '../utils/action_card.dart';
-import '../utils/info_card.dart';
+import 'package:flutter/material.dart';
+import '../models/transactions.dart';
+import '../services/offline_queue.dart';
+import '../../services/product_service.dart';
+import '../../services/transaction_service.dart';
+import '../../theme/app_theme.dart';
+import '../../utils/section_card.dart';
+import '../../utils/info_card.dart';
+import '../../utils/status_badge.dart';
+import '../../utils/top_header_bar.dart';
+import './dialog_screen/add_product_dialog.dart';
+import './dialog_screen/add_transaction_screen.dart';
+import './transaction_receipt_screen.dart';
+import 'account_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
-  final ValueChanged<int> onNavigatetoTab;
+  final ValueChanged<int>? onNavigateToTab;
 
-  const DashboardScreen({super.key, required this.onNavigatetoTab});
+  const DashboardScreen({super.key, this.onNavigateToTab, required void Function(int index) onNavigatetoTab});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  int _totalProducts = 0;
+  int _lowStockCount = 0;
+  List<Transaction> _recentTransactions = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDashboardData();
+  }
+
+  Future<void> _loadDashboardData() async {
+    setState(() => _loading = true);
+    try {
+      final totalFuture = ProductService.instance.getTotalCount();
+      final lowStockFuture = ProductService.instance.getLowStockCount();
+      final recentTxnsFuture = TransactionService.instance.getRecent(limit: 5);
+
+      final results = await Future.wait([
+        totalFuture,
+        lowStockFuture,
+        recentTxnsFuture,
+      ]);
+
+      final recentTxns = results[2] as List<Transaction>;
+      final pendingLocal = OfflineQueueService.instance.getAll().map((p) {
+        return Transaction(
+          billNo: p.billNo,
+          type: p.type,
+          totalItems: p.items.fold<double>(0.0, (sum, item) => sum + item.quantity),
+          remarks: p.remarks,
+          createdBy: p.userId,
+          createdAt: p.queuedAt,
+          items: p.items,
+          localId: p.localId,
+          isPendingSync: true,
+        );
+      }).toList();
+
+      final combined = [...pendingLocal, ...recentTxns];
+      final displayTxns = combined.length > 5 ? combined.sublist(0, 5) : combined;
+
+      if (!mounted) return;
+      setState(() {
+        _totalProducts = results[0] as int;
+        _lowStockCount = results[1] as int;
+        _recentTransactions = displayTxns;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _onAddProduct() async {
+    await AddProductDialog.show(
+      context,
+      onProductAdded: _loadDashboardData,
+    );
+    _loadDashboardData();
+  }
+
+  Future<void> _onReceive() async {
+    final added = await AddTransactionScreen.show(context, initialType: 'Receive');
+    if (added == true) {
+      _loadDashboardData();
+    }
+  }
+
+  Future<void> _onRelease() async {
+    final added = await AddTransactionScreen.show(context, initialType: 'Release');
+    if (added == true) {
+      _loadDashboardData();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(   
-      appBar: AppBar(
-        title: const Text(
-          'DASHBOARD',
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 18,
-          ),
-        ),
-        centerTitle: true,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+    final width = MediaQuery.of(context).size.width;
+    final horizontalPadding = width < 520 ? 16.0 : 32.0;
+
+    return SingleChildScrollView(
+      padding:
+          EdgeInsets.fromLTRB(horizontalPadding, 28, horizontalPadding, 40),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const InfoCard(
-            label: 'TOTAL PRODUCTS',
-            value: '0',
+          TopHeaderBar(
+            title: 'Dashboard',
+            subtitle:
+                'Welcome back — here\'s what\'s happening in your warehouse.',
+            onAccountTap: () {
+              if (widget.onNavigateToTab != null) {
+                widget.onNavigateToTab!(5);
+              } else {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const Scaffold(body: AccountScreen())),
+                );
+              }
+            },
           ),
-          const SizedBox(height: 16),
-          const InfoCard(
-            label: 'LOW STOCK ALERT',
-            value: '0',
+          const SizedBox(height: AppSpacing.xl),
+          _buildStatGrid(context),
+          const SizedBox(height: AppSpacing.lg),
+          _buildMiddleSection(context),
+          const SizedBox(height: AppSpacing.lg),
+          _buildRecentTransactions(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatGrid(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cards = [
+          StatCard(
+            label: 'Total Products',
+            value: _loading ? '...' : '$_totalProducts',
+            icon: Icons.inventory_2_rounded,
+            iconColor: AppColors.primary,
+            iconBg: AppColors.primarySoft,
           ),
-          const SizedBox(height: 20),
-          Column(
+          StatCard(
+            label: 'Low Stock Alert',
+            value: _loading ? '...' : '$_lowStockCount',
+            icon: Icons.warning_rounded,
+            iconColor: AppColors.warning,
+            iconBg: AppColors.warningSoft,
+            badgeText: _lowStockCount > 0 ? 'Needs review' : 'Optimal',
+            badgeTone:
+                _lowStockCount > 0 ? BadgeTone.warning : BadgeTone.success,
+          ),
+        ];
+
+        if (constraints.maxWidth <= 520) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'QUICK ACTIONS',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                  letterSpacing: 0.5,
-                  color: Colors.black87,
-                ),
-              ),
-              const SizedBox(height: 12),
-              ActionTile(
-                label: 'Add Product',
-                onTap: () {},
-              ),
-              const SizedBox(height: 12),
-              ActionTile(
-                label: 'Receive Stock',
-                onTap: () {},
-              ),
-              const SizedBox(height: 12),
-              ActionTile(
-                label: 'Release Stock',
-                onTap: () {},
+              for (int i = 0; i < cards.length; i++) ...[
+                cards[i],
+                if (i != cards.length - 1)
+                  const SizedBox(height: AppSpacing.md),
+              ],
+            ],
+          );
+        }
+
+        if (constraints.maxWidth <= 900) {
+          final itemWidth = (constraints.maxWidth - AppSpacing.md) / 2;
+          return Wrap(
+            spacing: AppSpacing.md,
+            runSpacing: AppSpacing.md,
+            children:
+                cards.map((c) => SizedBox(width: itemWidth, child: c)).toList(),
+          );
+        }
+
+        return Row(
+          children: [
+            for (int i = 0; i < cards.length; i++) ...[
+              Expanded(child: cards[i]),
+              if (i != cards.length - 1) const SizedBox(width: AppSpacing.md),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMiddleSection(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final actions = _buildQuickActions();
+        return actions;
+      },
+    );
+  }
+
+  Widget _buildQuickActions() {
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Quick Actions', style: AppTextStyles.h3),
+          const SizedBox(height: 4),
+          Text('Common tasks, one tap away.', style: AppTextStyles.caption),
+          const SizedBox(height: AppSpacing.lg),
+          _QuickActionButton(
+            icon: Icons.add_circle_rounded,
+            label: 'Add Product',
+            iconColor: AppColors.primary,
+            iconBg: AppColors.primarySoft,
+            onTap: _onAddProduct,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _QuickActionButton(
+            icon: Icons.arrow_downward_rounded,
+            label: 'Receive Stock',
+            iconColor: AppColors.success,
+            iconBg: AppColors.successSoft,
+            onTap: _onReceive,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _QuickActionButton(
+            icon: Icons.arrow_upward_rounded,
+            label: 'Release Stock',
+            iconColor: AppColors.danger,
+            iconBg: const Color(0x1AEF4444),
+            onTap: _onRelease,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecentTransactions(BuildContext context) {
+    return SectionCard(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Recent Transactions', style: AppTextStyles.h3),
+              TextButton(
+                onPressed: _loadDashboardData,
+                style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+                child: Text('Refresh',
+                    style: AppTextStyles.bodyMedium
+                        .copyWith(color: AppColors.primary)),
               ),
             ],
           ),
+          const SizedBox(height: AppSpacing.sm),
+          _loading
+              ? const SizedBox(
+                  height: 140,
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              : _recentTransactions.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: Text(
+                          'No recent transactions recorded yet.',
+                          style: AppTextStyles.body
+                              .copyWith(color: AppColors.textSecondary),
+                        ),
+                      ),
+                    )
+                  : _TransactionsTable(transactions: _recentTransactions),
         ],
       ),
     );
   }
 }
 
+class _QuickActionButton extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final Color iconColor;
+  final Color iconBg;
+  final VoidCallback onTap;
+
+  const _QuickActionButton({
+    required this.icon,
+    required this.label,
+    required this.iconColor,
+    required this.iconBg,
+    required this.onTap,
+  });
+
+  @override
+  State<_QuickActionButton> createState() => _QuickActionButtonState();
+}
+
+class _QuickActionButtonState extends State<_QuickActionButton> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _hovering ? AppColors.background : AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                    color: widget.iconBg,
+                    borderRadius: BorderRadius.circular(8)),
+                child: Icon(widget.icon, size: 17, color: widget.iconColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                  child: Text(widget.label, style: AppTextStyles.bodyMedium)),
+              const Icon(Icons.chevron_right_rounded,
+                  size: 18, color: AppColors.textMuted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TransactionsTable extends StatelessWidget {
+  final List<Transaction> transactions;
+  const _TransactionsTable({required this.transactions});
+
+  @override
+  Widget build(BuildContext context) {
+    final compact = MediaQuery.of(context).size.width < 500;
+
+    return Column(
+      children: [
+        if (!compact) ...[
+          // Header row.
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+            child: Row(
+              children: [
+                Expanded(flex: 3, child: Text('BILL NO.', style: AppTextStyles.label)),
+                Expanded(flex: 2, child: Text('TYPE', style: AppTextStyles.label)),
+                Expanded(
+                  flex: 2,
+                  child: Text('TOTAL ITEMS',
+                      textAlign: TextAlign.right, style: AppTextStyles.label),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 0.6, thickness: 0.6),
+        ],
+        // Data rows.
+        ...transactions.expand((t) {
+          final inbound = t.type.toLowerCase() == 'receive' ||
+              t.type.toLowerCase() == 'inbound' ||
+              t.type.toLowerCase() == 'purchase';
+          final dateStr = t.createdAt != null
+              ? '${t.createdAt!.year}-${t.createdAt!.month.toString().padLeft(2, '0')}-${t.createdAt!.day.toString().padLeft(2, '0')}'
+              : 'N/A';
+
+          Future<void> openDetails() async {
+            try {
+              final detailedTxn = t.id != null
+                  ? await TransactionService.instance.getById(t.id!)
+                  : t;
+              if (!context.mounted) return;
+              TransactionReceiptScreen.navigateTo(context, detailedTxn);
+            } catch (e) {
+              if (!context.mounted) return;
+              TransactionReceiptScreen.navigateTo(context, t);
+            }
+          }
+
+          if (compact) {
+            return [
+              InkWell(
+                onTap: openDetails,
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              t.billNo,
+                              style: AppTextStyles.mono.copyWith(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          StatusBadge(
+                            label: inbound ? 'Receive' : 'Release',
+                            tone: inbound ? BadgeTone.success : BadgeTone.danger,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            dateStr,
+                            style: AppTextStyles.caption.copyWith(
+                              color: AppColors.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                          Text(
+                            '${t.totalItems} items',
+                            style: AppTextStyles.caption.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(height: 0.6, thickness: 0.6),
+            ];
+          }
+
+          return [
+            InkWell(
+              onTap: openDetails,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            t.billNo,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTextStyles.mono
+                                .copyWith(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            dateStr,
+                            style: AppTextStyles.caption.copyWith(
+                              color: AppColors.textSecondary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: StatusBadge(
+                        label: inbound ? 'Receive' : 'Release',
+                        tone: inbound ? BadgeTone.success : BadgeTone.danger,
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        '${t.totalItems}',
+                        textAlign: TextAlign.right,
+                        style: AppTextStyles.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 0.6, thickness: 0.6),
+          ];
+        }),
+      ],
+    );
+  }
+}
