@@ -1,52 +1,52 @@
-import "package:flutter/material.dart";
+import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
+import 'section_card.dart';
+import 'status_badge.dart';
 
-
-class InfoCard extends StatelessWidget {
+class StatCard extends StatelessWidget {
   final String label;
   final String value;
+  final IconData icon;
+  final Color iconColor;
+  final Color iconBg;
+  final String? badgeText;
+  final BadgeTone badgeTone;
 
-  const InfoCard({super.key, required this.label, required this.value});
+  const StatCard({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.iconColor,
+    required this.iconBg,
+    this.badgeText,
+    this.badgeTone = BadgeTone.neutral,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
+    return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-              color: Colors.black54,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(AppRadius.sm)),
+                child: Icon(icon, size: 19, color: iconColor),
+              ),
+              if (badgeText != null) StatusBadge(label: badgeText!, tone: badgeTone),
+            ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w600,
-              color: Colors.black87,
-            ),
-          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(value, style: AppTextStyles.statValue),
+          const SizedBox(height: 4),
+          Text(label, style: AppTextStyles.caption),
         ],
       ),
     );
   }
 }
-
