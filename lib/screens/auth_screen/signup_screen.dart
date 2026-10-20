@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../theme/app_theme.dart';
 import '../../services/auth_service.dart';
 
@@ -79,27 +79,19 @@ class _SignupScreenState extends State<SignupScreen>
       );
       Navigator.of(context).pop(); // Back to LoginScreen / AuthGate
 
-    } on FirebaseAuthException catch (e) {
+    } on AuthException catch (e) {
       if (!mounted) return;
-      debugPrint('[SignUp] FirebaseAuthException: ${e.code} - ${e.message}');
+      debugPrint('[SignUp] AuthException: ${e.message}');
       String msg;
-      switch (e.code) {
-        case 'operation-not-allowed':
-          msg =
-              'Email/Password sign-in is disabled in Firebase Console. Please go to Firebase Console -> Authentication -> Sign-in method and enable Email/Password.';
-          break;
-        case 'email-already-in-use':
-          msg =
-              'An account already exists with this email address. Please sign in instead.';
-          break;
-        case 'invalid-email':
-          msg = 'The email address is invalid. Please check and try again.';
-          break;
-        case 'weak-password':
-          msg = 'Password is too weak. Please use at least 6 characters.';
-          break;
-        default:
-          msg = e.message ?? 'Sign up failed (${e.code}). Please try again.';
+      final errMsg = e.message.toLowerCase();
+      if (errMsg.contains('already registered') || errMsg.contains('already in use')) {
+        msg = 'An account already exists with this email address. Please sign in instead.';
+      } else if (errMsg.contains('invalid email') || errMsg.contains('valid email')) {
+        msg = 'The email address is invalid. Please check and try again.';
+      } else if (errMsg.contains('password') && errMsg.contains('weak')) {
+        msg = 'Password is too weak. Please use at least 6 characters.';
+      } else {
+        msg = e.message.isNotEmpty ? e.message : 'Sign up failed. Please try again.';
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

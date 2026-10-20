@@ -1,5 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 /// Permissions assigned to a member within a hardware workspace.
 class MemberPermissions {
   final bool canAddProducts;
@@ -19,20 +17,20 @@ class MemberPermissions {
   factory MemberPermissions.fromMap(Map<String, dynamic>? data) {
     if (data == null) return const MemberPermissions();
     return MemberPermissions(
-      canAddProducts: data['canAddProducts'] as bool? ?? data['allowAddProducts'] as bool? ?? true,
-      canEditProducts: data['canEditProducts'] as bool? ?? data['allowEditProducts'] as bool? ?? true,
-      canRemoveProducts: data['canRemoveProducts'] as bool? ?? data['allowRemoveProducts'] as bool? ?? false,
-      canAddTransactions: data['canAddTransactions'] as bool? ?? data['allowAddTransactions'] as bool? ?? true,
-      canCancelTransactions: data['canCancelTransactions'] as bool? ?? data['allowCancelTransactions'] as bool? ?? false,
+      canAddProducts: data['can_add_products'] as bool? ?? data['canAddProducts'] as bool? ?? true,
+      canEditProducts: data['can_edit_products'] as bool? ?? data['canEditProducts'] as bool? ?? true,
+      canRemoveProducts: data['can_remove_products'] as bool? ?? data['canRemoveProducts'] as bool? ?? false,
+      canAddTransactions: data['can_add_transactions'] as bool? ?? data['canAddTransactions'] as bool? ?? true,
+      canCancelTransactions: data['can_cancel_transactions'] as bool? ?? data['canCancelTransactions'] as bool? ?? false,
     );
   }
 
   Map<String, dynamic> toMap() => {
-        'canAddProducts': canAddProducts,
-        'canEditProducts': canEditProducts,
-        'canRemoveProducts': canRemoveProducts,
-        'canAddTransactions': canAddTransactions,
-        'canCancelTransactions': canCancelTransactions,
+        'can_add_products': canAddProducts,
+        'can_edit_products': canEditProducts,
+        'can_remove_products': canRemoveProducts,
+        'can_add_transactions': canAddTransactions,
+        'can_cancel_transactions': canCancelTransactions,
       };
 
   MemberPermissions copyWith({
@@ -54,6 +52,7 @@ class MemberPermissions {
 
 /// A member of a hardware workspace.
 class HardwareMember {
+  final String? id; // hardware_members PK
   final String userId;
   final String email;
   final String fullName;
@@ -62,6 +61,7 @@ class HardwareMember {
   final MemberPermissions permissions;
 
   const HardwareMember({
+    this.id,
     required this.userId,
     required this.email,
     required this.fullName,
@@ -70,30 +70,31 @@ class HardwareMember {
     this.permissions = const MemberPermissions(),
   });
 
-  factory HardwareMember.fromMap(String uid, Map<String, dynamic> data) {
+  factory HardwareMember.fromJson(Map<String, dynamic> data) {
+    // Supabase joins may nest the user info under a 'users' key
+    final userData = data['users'] as Map<String, dynamic>?;
+    final email = userData?['email'] as String? ?? data['email'] as String? ?? '';
+    final fullName = userData?['full_name'] as String? ?? data['full_name'] as String? ?? data['fullName'] as String? ?? email;
+
     return HardwareMember(
-      userId: uid,
-      email: data['email'] as String? ?? '',
-      fullName: data['fullName'] as String? ?? data['email'] as String? ?? 'User',
+      id: data['id']?.toString(),
+      userId: data['user_id'] as String? ?? '',
+      email: email,
+      fullName: fullName,
       role: data['role'] as String? ?? 'staff',
-      joinedAt: _parseDate(data['joinedAt']),
-      permissions: MemberPermissions.fromMap(
-        data['permissions'] as Map<String, dynamic>?,
-      ),
+      joinedAt: _parseDate(data['joined_at']),
+      permissions: MemberPermissions.fromMap(data),
     );
   }
 
   Map<String, dynamic> toMap() => {
-        'email': email,
-        'fullName': fullName,
+        'user_id': userId,
         'role': role,
-        'joinedAt': FieldValue.serverTimestamp(),
-        'permissions': permissions.toMap(),
+        ...permissions.toMap(),
       };
 
   static DateTime? _parseDate(dynamic val) {
     if (val == null) return null;
-    if (val is Timestamp) return val.toDate();
     if (val is String) return DateTime.tryParse(val);
     return null;
   }
@@ -141,35 +142,31 @@ class Hardware {
     required this.invitedEmails,
   });
 
-  factory Hardware.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>? ?? {};
-
-    final membersRaw = data['members'] as Map<String, dynamic>? ?? {};
-    final members = membersRaw.map(
-      (uid, memberData) => MapEntry(
-        uid,
-        HardwareMember.fromMap(
-            uid, (memberData as Map<String, dynamic>? ?? {})),
-      ),
-    );
+  /// Build from a Supabase row + separately loaded members & invites.
+  factory Hardware.fromJson(
+    Map<String, dynamic> data, {
+    List<HardwareMember> membersList = const [],
+    List<String> invites = const [],
+  }) {
+    final members = <String, HardwareMember>{};
+    final memberIds = <String>[];
+    for (final m in membersList) {
+      members[m.userId] = m;
+      memberIds.add(m.userId);
+    }
 
     return Hardware(
-      id: doc.id,
+      id: data['id']?.toString() ?? '',
       name: data['name'] as String? ?? 'Unnamed Hardware',
       description: data['description'] as String? ?? '',
-      createdBy: data['createdBy'] as String? ?? '',
-      createdAt: _parseDate(data['createdAt']),
-      memberIds: List<String>.from(data['memberIds'] as List? ?? []),
+      createdBy: data['created_by'] as String? ?? '',
+      createdAt: data['created_at'] != null
+          ? DateTime.tryParse(data['created_at'].toString())
+          : null,
+      memberIds: memberIds,
       members: members,
-      invitedEmails: List<String>.from(data['invitedEmails'] as List? ?? []),
+      invitedEmails: invites,
     );
-  }
-
-  static DateTime? _parseDate(dynamic val) {
-    if (val == null) return null;
-    if (val is Timestamp) return val.toDate();
-    if (val is String) return DateTime.tryParse(val);
-    return null;
   }
 
   int get memberCount => members.length;

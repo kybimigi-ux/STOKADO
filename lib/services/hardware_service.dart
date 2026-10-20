@@ -1,15 +1,14 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/hardware.dart';
 import 'auth_service.dart';
 
-/// Firestore-backed service for hardware workspace CRUD operations.
+/// Supabase-backed service for hardware workspace CRUD operations.
 class HardwareService {
   HardwareService._();
   static final HardwareService instance = HardwareService._();
 
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  CollectionReference get _col => _db.collection('hardwares');
+  static final SupabaseClient _client = Supabase.instance.client;
 
   // ---------------------------------------------------------------------------
   // Create
@@ -25,77 +24,125 @@ class HardwareService {
     final email = auth.email.toLowerCase().trim();
     final fullName = auth.displayName;
 
-    final memberData = {
-      'email': email,
-      'fullName': fullName,
-      'role': 'admin',
-      'joinedAt': FieldValue.serverTimestamp(),
-    };
+    // 1. Insert hardware row
+    final hwData = await _client
+        .from('hardwares')
+        .insert({
+          'name': name.trim(),
+          'description': description.trim(),
+          'created_by': uid,
+        })
+        .select()
+        .single();
 
-    final ref = await _col.add({
-      'name': name.trim(),
-      'description': description.trim(),
-      'createdBy': uid,
-      'createdAt': FieldValue.serverTimestamp(),
-      'memberIds': [uid],
-      'members': {uid: memberData},
-      'invitedEmails': [],
+    final hwId = hwData['id'] as String;
+
+    // 2. Add creator as admin member
+    await _client.from('hardware_members').insert({
+      'hardware_id': hwId,
+      'user_id': uid,
+      'role': 'admin',
     });
 
-    final doc = await ref.get();
-    return Hardware.fromFirestore(doc);
+    // Build the Hardware object from the inserted data
+    final member = HardwareMember(
+      userId: uid,
+      email: email,
+      fullName: fullName,
+      role: 'admin',
+      joinedAt: DateTime.now(),
+    );
+    return Hardware.fromJson(
+      hwData,
+      membersList: [member],
+    );
   }
 
   // ---------------------------------------------------------------------------
   // Read
   // ---------------------------------------------------------------------------
 
-  /// Returns all hardwares the current user belongs to (after auto-accepting invites).
+  /// Returns all hardwares the current user belongs to.
   Future<List<Hardware>> getMyHardwares() async {
     final uid = AuthService.instance.userId;
     final email = AuthService.instance.email.toLowerCase().trim();
     if (uid == null) return [];
 
-    // Accept any pending invites first, then query by memberIds
+    // Accept any pending invites first
     await _acceptPendingInvites(uid: uid, email: email);
 
     try {
-      final snap = await _col.where('memberIds', arrayContains: uid).get();
-      final list = snap.docs.map((d) => Hardware.fromFirestore(d)).toList();
-      list.sort((a, b) =>
-          (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
-      return list;
+      // Get hardware_ids this user is a member of
+      final memberRows = await _client
+          .from('hardware_members')
+          .select('hardware_id')
+          .eq('user_id', uid);
+
+      if ((memberRows as List).isEmpty) return [];
+
+      final hwIds = memberRows
+          .map((r) => r['hardware_id'] as String)
+          .toList();
+
+      // Fetch all matching hardware rows
+      final hwRows = await _client
+          .from('hardwares')
+          .select()
+          .inFilter('id', hwIds)
+          .order('created_at', ascending: false);
+
+      // Build Hardware objects with members + invites
+      final List<Hardware> result = [];
+      for (final hw in (hwRows as List)) {
+        final hwId = hw['id'] as String;
+        final hardware = await _buildHardware(hw as Map<String, dynamic>, hwId);
+        result.add(hardware);
+      }
+      return result;
     } catch (e) {
       debugPrint('[HardwareService] getMyHardwares error: $e');
       return [];
     }
   }
 
-  /// Auto-accept pending email invites: moves user from invitedEmails → members.
+  /// Auto-accept pending email invites.
   Future<void> _acceptPendingInvites({
     required String uid,
     required String email,
   }) async {
     if (email.isEmpty) return;
     try {
-      final snap =
-          await _col.where('invitedEmails', arrayContains: email).get();
-      for (final doc in snap.docs) {
-        final hw = Hardware.fromFirestore(doc);
-        if (!hw.memberIds.contains(uid)) {
-          final memberData = {
-            'email': email,
-            'fullName': AuthService.instance.displayName,
+      final inviteRows = await _client
+          .from('hardware_invites')
+          .select('hardware_id')
+          .eq('email', email);
+
+      for (final row in (inviteRows as List)) {
+        final hwId = row['hardware_id'] as String;
+
+        // Check if already a member
+        final existing = await _client
+            .from('hardware_members')
+            .select('id')
+            .eq('hardware_id', hwId)
+            .eq('user_id', uid)
+            .maybeSingle();
+
+        if (existing == null) {
+          await _client.from('hardware_members').insert({
+            'hardware_id': hwId,
+            'user_id': uid,
             'role': 'staff',
-            'joinedAt': FieldValue.serverTimestamp(),
-          };
-          await _col.doc(doc.id).update({
-            'memberIds': FieldValue.arrayUnion([uid]),
-            'members.$uid': memberData,
-            'invitedEmails': FieldValue.arrayRemove([email]),
           });
-          debugPrint('[HardwareService] Auto-accepted invite to ${hw.name}');
         }
+        // Remove the invite
+        await _client
+            .from('hardware_invites')
+            .delete()
+            .eq('hardware_id', hwId)
+            .eq('email', email);
+
+        debugPrint('[HardwareService] Auto-accepted invite to hw $hwId');
       }
     } catch (e) {
       debugPrint('[HardwareService] _acceptPendingInvites error: $e');
@@ -105,13 +152,43 @@ class HardwareService {
   /// Fetch a single hardware workspace by ID.
   Future<Hardware?> getById(String hardwareId) async {
     try {
-      final doc = await _col.doc(hardwareId).get();
-      if (!doc.exists) return null;
-      return Hardware.fromFirestore(doc);
+      final hw = await _client
+          .from('hardwares')
+          .select()
+          .eq('id', hardwareId)
+          .maybeSingle();
+      if (hw == null) return null;
+      return await _buildHardware(hw, hardwareId);
     } catch (e) {
       debugPrint('[HardwareService] getById error: $e');
       return null;
     }
+  }
+
+  /// Loads members + invites for a hardware row and constructs Hardware.
+  Future<Hardware> _buildHardware(
+      Map<String, dynamic> hw, String hwId) async {
+    // Load members with their user profiles
+    final memberRows = await _client
+        .from('hardware_members')
+        .select('*, users(email, full_name)')
+        .eq('hardware_id', hwId);
+
+    final members = (memberRows as List)
+        .map((r) => HardwareMember.fromJson(r as Map<String, dynamic>))
+        .toList();
+
+    // Load pending invites
+    final inviteRows = await _client
+        .from('hardware_invites')
+        .select('email')
+        .eq('hardware_id', hwId);
+
+    final invites = (inviteRows as List)
+        .map((r) => r['email'] as String)
+        .toList();
+
+    return Hardware.fromJson(hw, membersList: members, invites: invites);
   }
 
   // ---------------------------------------------------------------------------
@@ -124,33 +201,37 @@ class HardwareService {
     required String name,
     String description = '',
   }) async {
-    await _col.doc(hardwareId).update({
+    await _client.from('hardwares').update({
       'name': name.trim(),
       'description': description.trim(),
-    });
+    }).eq('id', hardwareId);
   }
 
-  /// Invite a member by email. The invite will be accepted next time they log in.
+  /// Invite a member by email.
   Future<void> inviteMemberByEmail(String hardwareId, String email) async {
     final normalizedEmail = email.toLowerCase().trim();
-    await _col.doc(hardwareId).update({
-      'invitedEmails': FieldValue.arrayUnion([normalizedEmail]),
+    await _client.from('hardware_invites').upsert({
+      'hardware_id': hardwareId,
+      'email': normalizedEmail,
     });
   }
 
   /// Remove a pending email invite.
   Future<void> removeInvite(String hardwareId, String email) async {
-    await _col.doc(hardwareId).update({
-      'invitedEmails': FieldValue.arrayRemove([email.toLowerCase().trim()]),
-    });
+    await _client
+        .from('hardware_invites')
+        .delete()
+        .eq('hardware_id', hardwareId)
+        .eq('email', email.toLowerCase().trim());
   }
 
   /// Remove an existing member from a workspace.
   Future<void> removeMember(String hardwareId, String userId) async {
-    await _col.doc(hardwareId).update({
-      'memberIds': FieldValue.arrayRemove([userId]),
-      'members.$userId': FieldValue.delete(),
-    });
+    await _client
+        .from('hardware_members')
+        .delete()
+        .eq('hardware_id', hardwareId)
+        .eq('user_id', userId);
   }
 
   /// Update permissions for a specific member in a hardware workspace.
@@ -159,9 +240,11 @@ class HardwareService {
     String userId,
     MemberPermissions permissions,
   ) async {
-    await _col.doc(hardwareId).update({
-      'members.$userId.permissions': permissions.toMap(),
-    });
+    await _client
+        .from('hardware_members')
+        .update(permissions.toMap())
+        .eq('hardware_id', hardwareId)
+        .eq('user_id', userId);
   }
 
   // ---------------------------------------------------------------------------
@@ -170,6 +253,6 @@ class HardwareService {
 
   /// Permanently delete a hardware workspace.
   Future<void> deleteHardware(String hardwareId) async {
-    await _col.doc(hardwareId).delete();
+    await _client.from('hardwares').delete().eq('id', hardwareId);
   }
 }

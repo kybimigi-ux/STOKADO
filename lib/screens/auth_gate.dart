@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_screen/auth_portal_screen.dart';
 import 'hardware_lobby_screen.dart';
 import '../services/auth_service.dart';
@@ -40,8 +40,8 @@ class _AuthGateState extends State<AuthGate> {
       );
     }
 
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
+    return StreamBuilder<AuthState>(
+      stream: Supabase.instance.client.auth.onAuthStateChange,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -49,10 +49,10 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
-        final user = snapshot.data;
+        final session = Supabase.instance.client.auth.currentSession;
 
-        if (user == null) {
-          // Clear active hardware on logout and ensure pushed routes are dismissed
+        if (session == null) {
+          // Clear active hardware on logout
           HardwareContext.instance.clearActiveHardware();
           WidgetsBinding.instance.addPostFrameCallback((_) {
             NavigationService.popToRoot();
@@ -69,7 +69,7 @@ class _AuthGateState extends State<AuthGate> {
                 body: Center(child: CircularProgressIndicator()),
               );
             }
-            // Always go to the hardware lobby — no pending approval screen.
+            // Always go to the hardware lobby.
             return const HardwareLobbyScreen();
           },
         );

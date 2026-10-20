@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../theme/app_theme.dart';
 import '../../services/auth_service.dart';
 import '../../services/navigation_service.dart';
@@ -66,29 +66,19 @@ class _LoginScreenState extends State<LoginScreen>
       );
       // Pop back to root so AuthGate can display HardwareLobbyScreen.
       NavigationService.popToRoot();
-    } on FirebaseAuthException catch (e) {
+    } on AuthException catch (e) {
       if (!mounted) return;
-      debugPrint('[SignIn] FirebaseAuthException: ${e.code} - ${e.message}');
+      debugPrint('[SignIn] AuthException: ${e.message}');
       String msg;
-      switch (e.code) {
-        case 'user-not-found':
-          msg = 'No account found with this email. Please register first.';
-          break;
-        case 'wrong-password':
-        case 'invalid-credential':
-          msg = 'Incorrect email or password. Please try again.';
-          break;
-        case 'user-disabled':
-          msg = 'This account has been disabled.';
-          break;
-        case 'operation-not-allowed':
-          msg = 'Email/Password sign-in is disabled in Firebase Console.';
-          break;
-        case 'invalid-email':
-          msg = 'The email address is invalid.';
-          break;
-        default:
-          msg = e.message ?? 'Sign in failed (${e.code}). Please try again.';
+      final errMsg = e.message.toLowerCase();
+      if (errMsg.contains('invalid') || errMsg.contains('credentials') || errMsg.contains('not found')) {
+        msg = 'Incorrect email or password. Please try again.';
+      } else if (errMsg.contains('disabled')) {
+        msg = 'This account has been disabled.';
+      } else if (errMsg.contains('email')) {
+        msg = 'The email address is invalid.';
+      } else {
+        msg = e.message.isNotEmpty ? e.message : 'Sign in failed. Please try again.';
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -139,9 +129,9 @@ class _LoginScreenState extends State<LoginScreen>
       await AuthService.instance.signInDemo(role: role);
       // Pop back to root so AuthGate can display HardwareLobbyScreen.
       NavigationService.popToRoot();
-    } on FirebaseAuthException catch (e) {
+    } on AuthException catch (e) {
       if (!mounted) return;
-      final msg = e.message ?? 'Demo sign-in failed. Please try again.';
+      final msg = e.message.isNotEmpty ? e.message : 'Demo sign-in failed. Please try again.';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(msg),

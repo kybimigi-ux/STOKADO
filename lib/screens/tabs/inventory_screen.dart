@@ -368,6 +368,7 @@ class _ProductTable extends StatelessWidget {
     required this.canDelete,
   });
 
+  static const double _priceColumnWidth = 90;
   static const double _stockColumnWidth = 120;
   static const double _actionsColumnWidth = 96;
 
@@ -423,6 +424,15 @@ class _ProductTable extends StatelessWidget {
                             ),
                           ),
                         ),
+                        const SizedBox(width: 8),
+                        if (p.price > 0)
+                          Text(
+                            '\u20b1${p.price % 1 == 0 ? p.price.toInt() : p.price.toStringAsFixed(2)}',
+                            style: AppTextStyles.caption.copyWith(
+                              color: AppColors.textSecondary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
                         const Spacer(),
                         if (canEdit)
                           IconButton(
@@ -473,6 +483,12 @@ class _ProductTable extends StatelessWidget {
                   child: Text('PRODUCT NAME', style: AppTextStyles.label),
                 ),
                 SizedBox(
+                  width: _priceColumnWidth,
+                  child: Text('PRICE',
+                      textAlign: TextAlign.right, style: AppTextStyles.label),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
                   width: _stockColumnWidth,
                   child: Text('IN STOCK',
                       textAlign: TextAlign.right, style: AppTextStyles.label),
@@ -509,6 +525,19 @@ class _ProductTable extends StatelessWidget {
                             ),
                           ),
                         ),
+                        SizedBox(
+                          width: _priceColumnWidth,
+                          child: Text(
+                            p.price > 0
+                                ? '\u20b1${p.price % 1 == 0 ? p.price.toInt() : p.price.toStringAsFixed(2)}'
+                                : '—',
+                            textAlign: TextAlign.right,
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
                         SizedBox(
                           width: _stockColumnWidth,
                           child: Text(

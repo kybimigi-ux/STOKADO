@@ -28,6 +28,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _quantityController;
+  late final TextEditingController _priceController;
   late final TextEditingController _remarksController;
   late String _selectedUnit;
   bool _loading = false;
@@ -56,6 +57,11 @@ class _EditProductDialogState extends State<EditProductDialog> {
     _nameController = TextEditingController(text: widget.product.productName);
     _quantityController =
         TextEditingController(text: widget.product.formattedQuantity);
+    _priceController = TextEditingController(
+        text: widget.product.price > 0
+            ? widget.product.price.toStringAsFixed(
+                widget.product.price % 1 == 0 ? 0 : 2)
+            : '0');
     _remarksController =
         TextEditingController(text: widget.product.remarks ?? '');
     _selectedUnit = widget.product.unit;
@@ -65,6 +71,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
   void dispose() {
     _nameController.dispose();
     _quantityController.dispose();
+    _priceController.dispose();
     _remarksController.dispose();
     super.dispose();
   }
@@ -77,10 +84,13 @@ class _EditProductDialogState extends State<EditProductDialog> {
       final qtyText = _quantityController.text.trim().replaceAll(',', '.');
       final parsedQty = double.tryParse(qtyText) ?? 0.0;
       final finalQty = _allowsDecimals ? parsedQty : parsedQty.truncateToDouble();
+      final parsedPrice = double.tryParse(
+            _priceController.text.trim().replaceAll(',', '.')) ?? 0.0;
       await ProductService.instance.update(widget.product.id!, {
         'product_name': _nameController.text.trim(),
         'quantity': finalQty,
         'unit': _selectedUnit,
+        'price': parsedPrice,
         'remarks': _remarksController.text.trim(),
       });
       if (!mounted) return;
@@ -297,6 +307,31 @@ class _EditProductDialogState extends State<EditProductDialog> {
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 18),
+                      _buildField(
+                        label: 'Price per Unit (₱)',
+                        child: TextFormField(
+                          controller: _priceController,
+                          style: AppTextStyles.body
+                              .copyWith(color: AppColors.textPrimary),
+                          decoration: _inputDecoration('0.00'),
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*[\.,]?\d*')),
+                          ],
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return null;
+                            final parsed = double.tryParse(
+                                v.trim().replaceAll(',', '.'));
+                            if (parsed == null || parsed < 0) {
+                              return 'Invalid price';
+                            }
+                            return null;
+                          },
+                        ),
                       ),
                       const SizedBox(height: 18),
                       _buildField(

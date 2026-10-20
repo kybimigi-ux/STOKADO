@@ -31,6 +31,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _quantityController = TextEditingController(text: '0');
+  final _priceController = TextEditingController(text: '0');
   final _remarksController = TextEditingController();
 
   String _selectedUnit = 'pcs';
@@ -59,6 +60,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
   void dispose() {
     _nameController.dispose();
     _quantityController.dispose();
+    _priceController.dispose();
     _remarksController.dispose();
     super.dispose();
   }
@@ -66,6 +68,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
   void _resetForm() {
     _nameController.clear();
     _quantityController.text = '0';
+    _priceController.text = '0';
     _remarksController.clear();
     setState(() {
       _selectedUnit = 'pcs';
@@ -80,10 +83,13 @@ class _AddProductDialogState extends State<AddProductDialog> {
       final qtyText = _quantityController.text.trim().replaceAll(',', '.');
       final parsedQty = double.tryParse(qtyText) ?? 0.0;
       final finalQty = _allowsDecimals ? parsedQty : parsedQty.truncateToDouble();
+      final parsedPrice = double.tryParse(
+            _priceController.text.trim().replaceAll(',', '.')) ?? 0.0;
       final product = Product(
         productName: _nameController.text.trim(),
         quantity: finalQty,
         unit: _selectedUnit,
+        price: parsedPrice,
         remarks: _remarksController.text.trim(),
       );
 
@@ -323,6 +329,31 @@ class _AddProductDialogState extends State<AddProductDialog> {
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 18),
+                      _buildField(
+                        label: 'Price per Unit (₱)',
+                        child: TextFormField(
+                          controller: _priceController,
+                          style: AppTextStyles.body
+                              .copyWith(color: AppColors.textPrimary),
+                          decoration: _inputDecoration('0.00'),
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*[\.,]?\d*')),
+                          ],
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return null;
+                            final parsed = double.tryParse(
+                                v.trim().replaceAll(',', '.'));
+                            if (parsed == null || parsed < 0) {
+                              return 'Invalid price';
+                            }
+                            return null;
+                          },
+                        ),
                       ),
                       const SizedBox(height: 18),
                       _buildField(
