@@ -74,12 +74,26 @@ class ProductService {
     final hwId = _hardwareId;
     if (hwId == null) throw StateError('No active workspace selected.');
     final payload = product.toInsertJson(hwId);
-    final data = await _client
-        .from('products')
-        .insert(payload)
-        .select()
-        .single();
-    return Product.fromJson(data);
+    try {
+      final data = await _client
+          .from('products')
+          .insert(payload)
+          .select()
+          .single();
+      return Product.fromJson(data);
+    } on PostgrestException catch (pe) {
+      if (pe.code == 'PGRST204' && pe.message.contains('image_url')) {
+        debugPrint('[ProductService] image_url column missing in schema cache, retrying insert without image_url...');
+        final fallbackPayload = Map<String, dynamic>.from(payload)..remove('image_url');
+        final data = await _client
+            .from('products')
+            .insert(fallbackPayload)
+            .select()
+            .single();
+        return Product.fromJson(data);
+      }
+      rethrow;
+    }
   }
 
   /// Update an existing product by ID.
@@ -96,6 +110,19 @@ class ProductService {
           .update(cleanData)
           .eq('id', id)
           .eq('hardware_id', hwId);
+    } on PostgrestException catch (pe) {
+      if (pe.code == 'PGRST204' && pe.message.contains('image_url')) {
+        debugPrint('[ProductService] image_url column missing in schema cache, retrying update without image_url...');
+        final fallbackData = Map<String, dynamic>.from(cleanData)..remove('image_url');
+        await _client
+            .from('products')
+            .update(fallbackData)
+            .eq('id', id)
+            .eq('hardware_id', hwId);
+        return;
+      }
+      debugPrint('[ProductService] update failed for $id: $pe');
+      rethrow;
     } catch (e) {
       debugPrint('[ProductService] update failed for $id: $e');
       rethrow;
