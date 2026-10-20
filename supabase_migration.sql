@@ -89,6 +89,8 @@ create table if not exists public.products (
   -- ✅ PRICE COLUMN (missing from original system — added here)
   price         numeric(15, 2) not null default 0,   -- selling / retail price per unit
   cost_price    numeric(15, 2) not null default 0,   -- purchase / cost price per unit
+  -- ✅ IMAGE URL COLUMN — stores a URL to a product photo (external or Supabase Storage)
+  image_url     text        default null,
   is_active     boolean     not null default true,
   remarks       text        default null,
   created_at    timestamptz not null default now(),
@@ -517,15 +519,65 @@ BEGIN
 END $$;
 
 -- =============================================================================
+-- STORAGE BUCKET: product-images (for product photo uploads)
+-- =============================================================================
+insert into storage.buckets (id, name, public)
+values ('product-images', 'product-images', true)
+on conflict (id) do update set public = true;
+
+-- Drop existing policies if re-running
+drop policy if exists "Public Access for product images" on storage.objects;
+drop policy if exists "Authenticated users can upload product images" on storage.objects;
+drop policy if exists "Authenticated users can update product images" on storage.objects;
+drop policy if exists "Authenticated users can delete product images" on storage.objects;
+
+-- Public can view product images
+create policy "Public Access for product images"
+  on storage.objects for select
+  using ( bucket_id = 'product-images' );
+
+-- Authenticated users can upload product images
+create policy "Authenticated users can upload product images"
+  on storage.objects for insert
+  to authenticated
+  with check ( bucket_id = 'product-images' );
+
+-- Authenticated users can update/replace product images
+create policy "Authenticated users can update product images"
+  on storage.objects for update
+  to authenticated
+  using ( bucket_id = 'product-images' );
+
+-- Authenticated users can delete product images
+create policy "Authenticated users can delete product images"
+  on storage.objects for delete
+  to authenticated
+  using ( bucket_id = 'product-images' );
+
+-- =============================================================================
+-- IF YOU ALREADY RAN THIS MIGRATION BEFORE (database already initialized):
+-- Run these statements in Supabase SQL Editor:
+--
+-- 1. Ensure column exists on products table:
+--    alter table public.products add column if not exists image_url text default null;
+--
+-- 2. Create the storage bucket & policies:
+--    insert into storage.buckets (id, name, public) values ('product-images', 'product-images', true) on conflict (id) do update set public = true;
+--    create policy "Public Access for product images" on storage.objects for select using ( bucket_id = 'product-images' );
+--    create policy "Authenticated users can upload product images" on storage.objects for insert to authenticated with check ( bucket_id = 'product-images' );
+--
+-- =============================================================================
 -- ✅ MIGRATION COMPLETE
 -- Tables created:
 --   public.users
 --   public.hardwares
 --   public.hardware_members
 --   public.hardware_invites
---   public.products            ← includes price & cost_price columns
+--   public.products            ← includes price, cost_price & image_url columns
 --   public.transactions        ← includes total_price column
 --   public.transaction_items   ← includes price & line_total columns
+-- Storage:
+--   storage.buckets            ← product-images (public bucket)
 -- Pre-seeded:
 --   Demo Admin (demo-admin@stokado.app / DemoAdmin123!)
 --   Demo Staff (demo-staff@stokado.app / DemoStaff123!)

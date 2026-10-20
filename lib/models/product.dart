@@ -6,10 +6,11 @@ class Product {
   final String? categoryName;
   final double quantity;
   final String unit;
-  final double price;     // selling / retail price per unit
-  final double costPrice; // purchase / cost price per unit
+  final double price;      // selling / retail price per unit
+  final double costPrice;  // purchase / cost price per unit
   final bool isActive;
   final String? remarks;
+  final String? imageUrl;  // optional product photo URL (Supabase Storage or external)
   final DateTime? createdAt;
 
   const Product({
@@ -24,6 +25,7 @@ class Product {
     this.costPrice = 0.0,
     this.isActive = true,
     this.remarks,
+    this.imageUrl,
     this.createdAt,
   });
 
@@ -63,6 +65,7 @@ class Product {
       costPrice: parseQty(json['cost_price'] ?? json['costPrice']),
       isActive: active,
       remarks: json['remarks']?.toString(),
+      imageUrl: (json['image_url'] ?? json['imageUrl'])?.toString(),
       createdAt: parseDate(json['created_at'] ?? json['createdAt']),
     );
   }
@@ -72,7 +75,7 @@ class Product {
     if (quantity % 1 == 0) {
       return quantity.toInt().toString();
     }
-    return quantity.toString().replaceAll(RegExp(r'([.]*0)(?!.*\d)'), '');
+    return quantity.toString().replaceAll(RegExp(r'([.]*0)(?!\d)'), '');
   }
 
   /// Formatted string for the price.
@@ -94,6 +97,7 @@ class Product {
       'cost_price': costPrice,
       'is_active': isActive,
       if (remarks != null && remarks!.isNotEmpty) 'remarks': remarks,
+      if (imageUrl != null && imageUrl!.isNotEmpty) 'image_url': imageUrl,
     };
   }
 
@@ -109,7 +113,9 @@ class Product {
     double? costPrice,
     bool? isActive,
     String? remarks,
+    String? imageUrl,
     DateTime? createdAt,
+    bool clearImage = false,
   }) {
     return Product(
       id: id ?? this.id,
@@ -123,6 +129,7 @@ class Product {
       costPrice: costPrice ?? this.costPrice,
       isActive: isActive ?? this.isActive,
       remarks: remarks ?? this.remarks,
+      imageUrl: clearImage ? null : (imageUrl ?? this.imageUrl),
       createdAt: createdAt ?? this.createdAt,
     );
   }

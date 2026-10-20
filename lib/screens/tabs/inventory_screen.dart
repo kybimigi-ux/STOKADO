@@ -25,6 +25,9 @@ extension _ProductSortLabel on ProductSort {
   }
 }
 
+/// Toggle between list and grid view for products.
+enum _ViewMode { list, grid }
+
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
 
@@ -38,6 +41,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   bool _loading = true;
   String? _error;
   ProductSort _sortOption = ProductSort.recentlyAdded;
+  _ViewMode _viewMode = _ViewMode.list;
 
   @override
   void initState() {
@@ -164,8 +168,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
             b.productName.toLowerCase().compareTo(a.productName.toLowerCase()));
         break;
       case ProductSort.recentlyAdded:
-        // Sort by createdAt desc; Firestore doc IDs are not sortable by creation order.
-        filtered.sort((a, b) => (b.createdAt ?? DateTime(1970)).compareTo(a.createdAt ?? DateTime(1970)));
+        filtered.sort((a, b) => (b.createdAt ?? DateTime(1970))
+            .compareTo(a.createdAt ?? DateTime(1970)));
         break;
     }
 
@@ -248,14 +252,23 @@ class _InventoryScreenState extends State<InventoryScreen> {
                               ),
                             ),
                           )
-                        : _ProductTable(
-                            products: filtered,
-                            onSelectProduct: _onOpenProductLedger,
-                            onEdit: _onEditProduct,
-                            onDelete: _onDeleteProduct,
-                            canEdit: canEdit,
-                            canDelete: canDelete,
-                          ),
+                        : _viewMode == _ViewMode.grid
+                            ? _ProductGrid(
+                                products: filtered,
+                                onSelectProduct: _onOpenProductLedger,
+                                onEdit: _onEditProduct,
+                                onDelete: _onDeleteProduct,
+                                canEdit: canEdit,
+                                canDelete: canDelete,
+                              )
+                            : _ProductTable(
+                                products: filtered,
+                                onSelectProduct: _onOpenProductLedger,
+                                onEdit: _onEditProduct,
+                                onDelete: _onDeleteProduct,
+                                canEdit: canEdit,
+                                canDelete: canDelete,
+                              ),
           ),
         ],
       ),
@@ -331,12 +344,48 @@ class _InventoryScreenState extends State<InventoryScreen> {
       ),
     );
 
+    // View mode toggle
+    final viewToggle = Container(
+      height: 44,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _ViewToggleButton(
+            icon: Icons.view_list_rounded,
+            selected: _viewMode == _ViewMode.list,
+            tooltip: 'List view',
+            onTap: () => setState(() => _viewMode = _ViewMode.list),
+            leftRounded: true,
+          ),
+          Container(width: 1, color: AppColors.border),
+          _ViewToggleButton(
+            icon: Icons.grid_view_rounded,
+            selected: _viewMode == _ViewMode.grid,
+            tooltip: 'Grid view',
+            onTap: () => setState(() => _viewMode = _ViewMode.grid),
+            leftRounded: false,
+          ),
+        ],
+      ),
+    );
+
     if (compact) {
       return Column(
         children: [
           searchField,
           const SizedBox(height: AppSpacing.sm),
-          sortDropdown,
+          Row(
+            children: [
+              Expanded(child: sortDropdown),
+              const SizedBox(width: AppSpacing.sm),
+              viewToggle,
+            ],
+          ),
         ],
       );
     }
@@ -346,10 +395,334 @@ class _InventoryScreenState extends State<InventoryScreen> {
         Expanded(child: searchField),
         const SizedBox(width: AppSpacing.md),
         sortDropdown,
+        const SizedBox(width: AppSpacing.sm),
+        viewToggle,
       ],
     );
   }
 }
+
+class _ViewToggleButton extends StatelessWidget {
+  final IconData icon;
+  final bool selected;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool leftRounded;
+
+  const _ViewToggleButton({
+    required this.icon,
+    required this.selected,
+    required this.tooltip,
+    required this.onTap,
+    required this.leftRounded,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.horizontal(
+          left: leftRounded ? const Radius.circular(AppRadius.sm - 1) : Radius.zero,
+          right: leftRounded ? Radius.zero : const Radius.circular(AppRadius.sm - 1),
+        ),
+        child: Container(
+          width: 40,
+          height: 44,
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primarySoft : Colors.transparent,
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: selected ? AppColors.primary : AppColors.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Grid view
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ProductGrid extends StatelessWidget {
+  final List<Product> products;
+  final Function(Product) onSelectProduct;
+  final Function(Product) onEdit;
+  final Function(Product) onDelete;
+  final bool canEdit;
+  final bool canDelete;
+
+  const _ProductGrid({
+    required this.products,
+    required this.onSelectProduct,
+    required this.onEdit,
+    required this.onDelete,
+    required this.canEdit,
+    required this.canDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final int crossAxisCount;
+        final double childAspectRatio;
+
+        if (width < 340) {
+          crossAxisCount = 1;
+          childAspectRatio = 1.15;
+        } else if (width < 580) {
+          crossAxisCount = 2;
+          childAspectRatio = 0.62;
+        } else if (width < 860) {
+          crossAxisCount = 3;
+          childAspectRatio = 0.66;
+        } else if (width < 1180) {
+          crossAxisCount = 4;
+          childAspectRatio = 0.70;
+        } else {
+          crossAxisCount = 5;
+          childAspectRatio = 0.72;
+        }
+
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: childAspectRatio,
+          ),
+          itemCount: products.length,
+          itemBuilder: (context, index) {
+            final p = products[index];
+            return _ProductGridCard(
+              product: p,
+              onTap: () => onSelectProduct(p),
+              onEdit: canEdit ? () => onEdit(p) : null,
+              onDelete: canDelete ? () => onDelete(p) : null,
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _ProductGridCard extends StatelessWidget {
+  final Product product;
+  final VoidCallback onTap;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+
+  const _ProductGridCard({
+    required this.product,
+    required this.onTap,
+    this.onEdit,
+    this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasImage =
+        product.imageUrl != null && product.imageUrl!.trim().isNotEmpty;
+    final isLowStock = product.quantity <= 10;
+
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Image Section (fills remaining space) ──
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(13)),
+                  child: SizedBox.expand(
+                    child: hasImage
+                        ? Image.network(
+                            product.imageUrl!.trim(),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _imageFallback(),
+                          )
+                        : _imageFallback(),
+                  ),
+                ),
+              ),
+
+              // ── Info Section (natural content height, no flex overflow) ──
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      product.productName,
+                      style: AppTextStyles.bodyMedium.copyWith(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                        height: 1.2,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+
+                    // Price
+                    Text(
+                      product.price > 0
+                          ? '₱${product.price % 1 == 0 ? product.price.toInt() : product.price.toStringAsFixed(2)}'
+                          : '₱0.00',
+                      style: AppTextStyles.bodyMedium.copyWith(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 5),
+
+                    // Stock badge & actions
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2.5),
+                            decoration: BoxDecoration(
+                              color: isLowStock
+                                  ? AppColors.warningSoft
+                                  : AppColors.successSoft,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '${product.formattedQuantity} ${product.unit}',
+                              style: AppTextStyles.caption.copyWith(
+                                fontSize: 10,
+                                color: isLowStock
+                                    ? AppColors.warning
+                                    : AppColors.success,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                        if (onEdit != null || onDelete != null) ...[
+                          const SizedBox(width: 4),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (onEdit != null)
+                                _SmallIconButton(
+                                  icon: Icons.edit_outlined,
+                                  color: AppColors.primary,
+                                  tooltip: 'Edit',
+                                  onTap: onEdit!,
+                                ),
+                              if (onDelete != null)
+                                _SmallIconButton(
+                                  icon: Icons.delete_outline_rounded,
+                                  color: AppColors.danger,
+                                  tooltip: 'Delete',
+                                  onTap: onDelete!,
+                                ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _imageFallback() {
+    return Container(
+      color: AppColors.neutralSoft,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.inventory_2_outlined,
+                size: 28, color: AppColors.textMuted),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(
+                product.productName,
+                style: AppTextStyles.caption.copyWith(
+                    color: AppColors.textMuted, fontSize: 10),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SmallIconButton extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _SmallIconButton({
+    required this.icon,
+    required this.color,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: const EdgeInsets.all(3),
+          child: Icon(icon, size: 14, color: color),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// List / Table view (unchanged logic, minor style tweaks for image preview)
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _ProductTable extends StatelessWidget {
   final List<Product> products;
@@ -368,6 +741,7 @@ class _ProductTable extends StatelessWidget {
     required this.canDelete,
   });
 
+  static const double _thumbSize = 36;
   static const double _priceColumnWidth = 90;
   static const double _stockColumnWidth = 120;
   static const double _actionsColumnWidth = 96;
@@ -385,6 +759,7 @@ class _ProductTable extends StatelessWidget {
   Widget _buildMobileList() {
     return Column(
       children: products.map((p) {
+        final hasImage = p.imageUrl != null && p.imageUrl!.isNotEmpty;
         return Column(
           children: [
             InkWell(
@@ -392,71 +767,95 @@ class _ProductTable extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    // Product name — full display, no ellipsis
-                    Text(
-                      p.productName,
-                      style: AppTextStyles.bodyMedium.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w600,
+                    // Thumbnail
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        width: _thumbSize,
+                        height: _thumbSize,
+                        color: AppColors.neutralSoft,
+                        child: hasImage
+                            ? Image.network(p.imageUrl!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const Icon(
+                                    Icons.inventory_2_outlined,
+                                    size: 18,
+                                    color: AppColors.textMuted))
+                            : const Icon(Icons.inventory_2_outlined,
+                                size: 18, color: AppColors.textMuted),
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: p.quantity <= 10
-                                ? AppColors.warningSoft
-                                : AppColors.successSoft,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            '${p.formattedQuantity} ${p.unit}',
-                            style: AppTextStyles.caption.copyWith(
-                              color: p.quantity <= 10
-                                  ? AppColors.warning
-                                  : AppColors.success,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            p.productName,
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: AppColors.textPrimary,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        if (p.price > 0)
-                          Text(
-                            '\u20b1${p.price % 1 == 0 ? p.price.toInt() : p.price.toStringAsFixed(2)}',
-                            style: AppTextStyles.caption.copyWith(
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w500,
-                            ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: p.quantity <= 10
+                                      ? AppColors.warningSoft
+                                      : AppColors.successSoft,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  '${p.formattedQuantity} ${p.unit}',
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: p.quantity <= 10
+                                        ? AppColors.warning
+                                        : AppColors.success,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              if (p.price > 0)
+                                Text(
+                                  '\u20b1${p.price % 1 == 0 ? p.price.toInt() : p.price.toStringAsFixed(2)}',
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: AppColors.textSecondary,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                            ],
                           ),
-                        const Spacer(),
-                        if (canEdit)
-                          IconButton(
-                            onPressed: () => onEdit(p),
-                            icon: const Icon(Icons.edit_outlined,
-                                size: 18, color: AppColors.primary),
-                            splashRadius: 18,
-                            tooltip: 'Edit',
-                            constraints: const BoxConstraints(),
-                            padding: const EdgeInsets.all(8),
-                          ),
-                        if (canEdit && canDelete) const SizedBox(width: 4),
-                        if (canDelete)
-                          IconButton(
-                            onPressed: () => onDelete(p),
-                            icon: const Icon(Icons.delete_outline_rounded,
-                                size: 18, color: AppColors.danger),
-                            splashRadius: 18,
-                            tooltip: 'Delete',
-                            constraints: const BoxConstraints(),
-                            padding: const EdgeInsets.all(8),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
+                    if (canEdit)
+                      IconButton(
+                        onPressed: () => onEdit(p),
+                        icon: const Icon(Icons.edit_outlined,
+                            size: 18, color: AppColors.primary),
+                        splashRadius: 18,
+                        tooltip: 'Edit',
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.all(8),
+                      ),
+                    if (canEdit && canDelete) const SizedBox(width: 4),
+                    if (canDelete)
+                      IconButton(
+                        onPressed: () => onDelete(p),
+                        icon: const Icon(Icons.delete_outline_rounded,
+                            size: 18, color: AppColors.danger),
+                        splashRadius: 18,
+                        tooltip: 'Delete',
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.all(8),
+                      ),
                   ],
                 ),
               ),
@@ -479,6 +878,7 @@ class _ProductTable extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(
               children: [
+                const SizedBox(width: _thumbSize + 10),
                 Expanded(
                   child: Text('PRODUCT NAME', style: AppTextStyles.label),
                 ),
@@ -507,15 +907,36 @@ class _ProductTable extends StatelessWidget {
           const Divider(height: 1, color: AppColors.border),
           // Data rows
           ...products.map((p) {
+            final hasImage = p.imageUrl != null && p.imageUrl!.isNotEmpty;
             return Column(
               children: [
                 InkWell(
                   onTap: () => onSelectProduct(p),
                   borderRadius: BorderRadius.circular(8),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 10, horizontal: 4),
                     child: Row(
                       children: [
+                        // Thumbnail
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            width: _thumbSize,
+                            height: _thumbSize,
+                            color: AppColors.neutralSoft,
+                            child: hasImage
+                                ? Image.network(p.imageUrl!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) =>
+                                        const Icon(Icons.inventory_2_outlined,
+                                            size: 18,
+                                            color: AppColors.textMuted))
+                                : const Icon(Icons.inventory_2_outlined,
+                                    size: 18, color: AppColors.textMuted),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             p.productName,
@@ -565,8 +986,10 @@ class _ProductTable extends StatelessWidget {
                                 if (canDelete)
                                   IconButton(
                                     onPressed: () => onDelete(p),
-                                    icon: const Icon(Icons.delete_outline_rounded,
-                                        size: 18, color: AppColors.danger),
+                                    icon: const Icon(
+                                        Icons.delete_outline_rounded,
+                                        size: 18,
+                                        color: AppColors.danger),
                                     splashRadius: 18,
                                     tooltip: 'Delete',
                                   ),
