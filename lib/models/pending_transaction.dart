@@ -7,8 +7,6 @@ import 'transaction_item.dart';
 /// syncing just means replaying that call later with the same arguments.
 class PendingTransaction {
   /// Client-generated ID, stable for the life of this queue entry.
-  /// Used as the Hive key and also stamped into the local bill number
-  /// fallback so duplicate queue entries are easy to spot.
   final String localId;
 
   final String billNo;
@@ -25,8 +23,7 @@ class PendingTransaction {
   /// Custom transaction date/time if specified by user, otherwise queuedAt.
   final DateTime? createdAt;
 
-  /// Set when a sync attempt fails. Null means "never tried" or "no error
-  /// from the most recent attempt" — check [lastAttemptAt] to distinguish.
+  /// Set when a sync attempt fails.
   final String? lastError;
 
   /// When the most recent sync attempt happened (success or failure).
@@ -76,7 +73,11 @@ class PendingTransaction {
         'billNo': billNo,
         'type': type,
         'status': status,
-        'items': items.map((i) => i.toInsertJson('')).toList(),
+        // Persist price from items so it survives app restarts
+        'items': items
+            .map((i) => i.toInsertJson('', hardwareId: null)
+              ..addAll({'product_name': i.productName}))
+            .toList(),
         'remarks': remarks,
         'issuedTo': issuedTo,
         'userId': userId,

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
 import 'screens/auth_gate.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import 'services/auth_service.dart';
@@ -16,8 +15,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
+    await Supabase.initialize(
+      url: 'https://cunrimpeugkvejtjouhw.supabase.co',
+      publishableKey:
+          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bnJpbXBldWdrdmVqdGpvdWh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0MjU1MzAsImV4cCI6MjEwODAwMTUzMH0.ZpBQBbkKZR4gYhfvrUzF7WBUlhZyq7KhdRDYEl6_RDw',
     );
 
     await SettingsService.instance.init();
@@ -55,8 +56,7 @@ void main() async {
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'Make sure firebase_options.dart is generated.\n'
-                  'Run: flutterfire configure',
+                  'Make sure Supabase credentials are correct.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.black54, fontSize: 13),
                 ),

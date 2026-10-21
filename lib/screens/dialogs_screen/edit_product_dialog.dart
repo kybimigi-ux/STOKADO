@@ -4,6 +4,7 @@ import '../../models/product.dart';
 import '../../services/product_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/notification_banner.dart';
+import '../dialogs_screen/image_url_picker.dart';
 
 /// A dialog for editing an existing product.
 class EditProductDialog extends StatefulWidget {
@@ -28,9 +29,12 @@ class _EditProductDialogState extends State<EditProductDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _quantityController;
+  late final TextEditingController _priceController;
   late final TextEditingController _remarksController;
   late String _selectedUnit;
+  String? _imageUrl;
   bool _loading = false;
+
   bool get _allowsDecimals {
     final u = _selectedUnit.trim().toLowerCase();
     return u == 'kg' || u == 'cubic';
@@ -56,17 +60,31 @@ class _EditProductDialogState extends State<EditProductDialog> {
     _nameController = TextEditingController(text: widget.product.productName);
     _quantityController =
         TextEditingController(text: widget.product.formattedQuantity);
+    _priceController = TextEditingController(
+        text: widget.product.price > 0
+            ? widget.product.price.toStringAsFixed(
+                widget.product.price % 1 == 0 ? 0 : 2)
+            : '0');
     _remarksController =
         TextEditingController(text: widget.product.remarks ?? '');
     _selectedUnit = widget.product.unit;
+    _imageUrl = widget.product.imageUrl;
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     _quantityController.dispose();
+    _priceController.dispose();
     _remarksController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    final url = await ImageUrlPicker.show(context, initialUrl: _imageUrl);
+    if (url != null) {
+      setState(() => _imageUrl = url.isEmpty ? null : url);
+    }
   }
 
   Future<void> _handleSubmit() async {
@@ -77,11 +95,15 @@ class _EditProductDialogState extends State<EditProductDialog> {
       final qtyText = _quantityController.text.trim().replaceAll(',', '.');
       final parsedQty = double.tryParse(qtyText) ?? 0.0;
       final finalQty = _allowsDecimals ? parsedQty : parsedQty.truncateToDouble();
+      final parsedPrice = double.tryParse(
+            _priceController.text.trim().replaceAll(',', '.')) ?? 0.0;
       await ProductService.instance.update(widget.product.id!, {
         'product_name': _nameController.text.trim(),
         'quantity': finalQty,
         'unit': _selectedUnit,
+        'price': parsedPrice,
         'remarks': _remarksController.text.trim(),
+        'image_url': _imageUrl,
       });
       if (!mounted) return;
 
@@ -107,7 +129,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final compact = width < 600;
-    final dialogWidth = width > 600 ? 520.0 : width * 0.95;
+    final dialogWidth = width > 600 ? 560.0 : width * 0.95;
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -116,7 +138,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
           : const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: Container(
         width: dialogWidth,
-        constraints: BoxConstraints(maxHeight: compact ? MediaQuery.of(context).size.height * 0.88 : 560),
+        constraints: BoxConstraints(maxHeight: compact ? MediaQuery.of(context).size.height * 0.92 : 680),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(compact ? 16 : 20),
@@ -141,6 +163,9 @@ class _EditProductDialogState extends State<EditProductDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // ─── Product Image ─────────────────────────────────
+                      _buildImagePicker(compact),
+                      const SizedBox(height: 18),
                       _buildField(
                         label: 'Product Name',
                         child: TextFormField(
@@ -300,6 +325,31 @@ class _EditProductDialogState extends State<EditProductDialog> {
                       ),
                       const SizedBox(height: 18),
                       _buildField(
+                        label: 'Price per Unit (₱)',
+                        child: TextFormField(
+                          controller: _priceController,
+                          style: AppTextStyles.body
+                              .copyWith(color: AppColors.textPrimary),
+                          decoration: _inputDecoration('0.00'),
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*[\.,]?\d*')),
+                          ],
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return null;
+                            final parsed = double.tryParse(
+                                v.trim().replaceAll(',', '.'));
+                            if (parsed == null || parsed < 0) {
+                              return 'Invalid price';
+                            }
+                            return null;
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      _buildField(
                         label: 'Remarks / Notes (Optional)',
                         child: TextFormField(
                           controller: _remarksController,
@@ -319,6 +369,106 @@ class _EditProductDialogState extends State<EditProductDialog> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildImagePicker(bool compact) {
+    final hasImage = _imageUrl != null && _imageUrl!.isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Product Image (Optional)', style: AppTextStyles.label),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: _pickImage,
+          child: Container(
+            height: 110,
+            decoration: BoxDecoration(
+              color: AppColors.background,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: hasImage ? AppColors.primary : AppColors.border,
+                width: hasImage ? 1.5 : 1,
+              ),
+            ),
+            child: hasImage
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(11),
+                    child: Stack(
+                      children: [
+                        Image.network(
+                          _imageUrl!,
+                          width: double.infinity,
+                          height: 110,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              _imagePlaceholder(true),
+                        ),
+                        Positioned(
+                          top: 6,
+                          right: 6,
+                          child: GestureDetector(
+                            onTap: () => setState(() => _imageUrl = null),
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.close,
+                                  size: 14, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          bottom: 6,
+                          right: 6,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text('Change',
+                                style: TextStyle(
+                                    color: Colors.white, fontSize: 11)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : _imagePlaceholder(false),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _imagePlaceholder(bool error) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          error
+              ? Icons.broken_image_outlined
+              : Icons.add_photo_alternate_outlined,
+          size: 28,
+          color: AppColors.textMuted,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          error ? 'Could not load image' : 'Click to upload or choose product photo',
+          style: AppTextStyles.caption.copyWith(
+              color: AppColors.textSecondary, fontWeight: FontWeight.w500),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          error ? 'Tap to change' : 'Upload from device or enter image URL',
+          style: AppTextStyles.caption
+              .copyWith(color: AppColors.textMuted, fontSize: 11),
+        ),
+      ],
     );
   }
 

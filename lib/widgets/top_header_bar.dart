@@ -233,7 +233,7 @@ class _NotificationBell extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('System Ready', style: AppTextStyles.bodyMedium),
-                    Text('STOKADO connected to Firebase',
+                    Text('STOKADO connected to Supabase',
                         style: AppTextStyles.caption),
                   ],
                 ),

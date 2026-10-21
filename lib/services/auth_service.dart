@@ -1,37 +1,35 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'hardware_context.dart';
 import 'navigation_service.dart';
 
-class PendingApprovalException implements Exception {
-  @override
-  String toString() => 'Your account is pending approval by an administrator.';
-}
-
-/// Thin wrapper around Firebase Auth + Firestore that every screen can import
-/// without coupling directly to the Firebase SDK.
+/// Thin wrapper around Supabase Auth + database that every screen can import
+/// without coupling directly to the Supabase SDK.
 class AuthService extends ChangeNotifier {
   AuthService._();
   static final AuthService instance = AuthService._();
 
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  static final SupabaseClient _client = Supabase.instance.client;
 
   static const _kSessionLoginTime = 'auth_session_login_time';
   static const _kCachedRole = 'auth_cached_role';
 
-  /// Initialize session & persistence settings (e.g. on web)
+  /// Initialize auth (listen to auth state changes).
   Future<void> init() async {
-    if (kIsWeb) {
-      try {
-        await _auth.setPersistence(Persistence.LOCAL);
-      } catch (e) {
-        debugPrint('[AuthService] setPersistence error: $e');
+    // Listen to Supabase auth state changes to keep role cache in sync
+    _client.auth.onAuthStateChange.listen((data) async {
+      final event = data.event;
+      if (event == AuthChangeEvent.signedOut) {
+        _resetRole();
+      } else if (event == AuthChangeEvent.signedIn ||
+          event == AuthChangeEvent.tokenRefreshed) {
+        // Refresh role in background
+        final uid = _client.auth.currentUser?.id;
+        if (uid != null) unawaited(_doFetchUserRole(uid));
       }
-    }
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -39,23 +37,27 @@ class AuthService extends ChangeNotifier {
   // ---------------------------------------------------------------------------
 
   /// Emits whenever the auth state changes (sign-in, sign-out, token refresh).
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
+  Stream<AuthState> get authStateChanges =>
+      _client.auth.onAuthStateChange;
 
   // ---------------------------------------------------------------------------
   // Getters
   // ---------------------------------------------------------------------------
 
-  /// The currently authenticated user, or `null` if signed out.
-  User? get currentUser => _auth.currentUser;
+  /// The currently authenticated Supabase user, or `null` if signed out.
+  User? get currentUser => _client.auth.currentUser;
 
-  /// Convenience — the user's display name.
-  String get displayName => currentUser?.displayName ?? 'User';
+  /// Convenience — the user's display name (from user_metadata).
+  String get displayName =>
+      (currentUser?.userMetadata?['full_name'] as String?)?.trim().isNotEmpty == true
+          ? currentUser!.userMetadata!['full_name'] as String
+          : 'User';
 
   /// Convenience — the user's email.
   String get email => currentUser?.email ?? '';
 
   /// Convenience — the current user's UID.
-  String? get userId => currentUser?.uid;
+  String? get userId => currentUser?.id;
 
   String? _cachedRole;
   bool _isRoleLoading = false;
@@ -75,8 +77,6 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Checks if the session is still within the 1-week (7-day) limit.
-  /// If older than 7 days, signs out the user and returns false.
-  /// Otherwise, keeps the user signed in and returns true.
   Future<bool> checkSessionValidity() async {
     final user = currentUser;
     if (user == null) return false;
@@ -86,7 +86,6 @@ class AuthService extends ChangeNotifier {
       final loginTimeMs = prefs.getInt(_kSessionLoginTime);
 
       if (loginTimeMs == null) {
-        // Record current timestamp for existing sessions without a timestamp
         await prefs.setInt(
             _kSessionLoginTime, DateTime.now().millisecondsSinceEpoch);
         return true;
@@ -95,7 +94,6 @@ class AuthService extends ChangeNotifier {
       final loginDate = DateTime.fromMillisecondsSinceEpoch(loginTimeMs);
       final difference = DateTime.now().difference(loginDate);
 
-      // 1-week session lifespan limit: 7 days
       if (difference.inDays >= 7) {
         debugPrint(
             '[AuthService] 1-week session expired (${difference.inDays} days old). Signing out.');
@@ -110,7 +108,7 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  /// Fetch user role from the `users` Firestore collection.
+  /// Fetch user role from the `users` table.
   Future<String?> fetchUserRole({bool forceRefresh = false}) async {
     final uid = userId;
     if (uid == null) {
@@ -120,7 +118,7 @@ class AuthService extends ChangeNotifier {
 
     if (!forceRefresh && _cachedRole != null) return _cachedRole;
 
-    // Load from local preferences first to avoid flicker or premature pending screen
+    // Load from local preferences first to avoid flicker
     if (!forceRefresh && _cachedRole == null) {
       try {
         final prefs = await SharedPreferences.getInstance();
@@ -147,14 +145,15 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final doc = await _db
-          .collection('users')
-          .doc(uid)
-          .get()
+      final data = await _client
+          .from('users')
+          .select('role')
+          .eq('id', uid)
+          .maybeSingle()
           .timeout(const Duration(seconds: 15));
 
-      if (doc.exists && doc.data()?['role'] != null) {
-        final r = doc.data()!['role'].toString().trim();
+      if (data != null && data['role'] != null) {
+        final r = data['role'].toString().trim();
         _cachedRole = r.isNotEmpty
             ? r[0].toUpperCase() + r.substring(1).toLowerCase()
             : null;
@@ -163,28 +162,26 @@ class AuthService extends ChangeNotifier {
           await prefs.setString(_kCachedRole, _cachedRole!);
         }
       } else {
-        // Fallback for demo accounts if user doc creation was delayed
-        if (currentUser?.email == _demoAdminEmail) {
+        // Demo account fallback
+        if (email == _demoAdminEmail) {
           _cachedRole = 'Admin';
-        } else if (currentUser?.email == _demoStaffEmail) {
+        } else if (email == _demoStaffEmail) {
           _cachedRole = 'Staff';
         } else {
           _cachedRole = null;
-          debugPrint('[AuthService] uid=$uid has no approved role yet');
         }
       }
     } catch (e) {
       debugPrint('[AuthService] Could not fetch user role: $e');
-      // Fallback to local cache or demo role
       if (_cachedRole == null) {
         try {
           final prefs = await SharedPreferences.getInstance();
           _cachedRole = prefs.getString(_kCachedRole);
         } catch (_) {}
         if (_cachedRole == null) {
-          if (currentUser?.email == _demoAdminEmail) {
+          if (email == _demoAdminEmail) {
             _cachedRole = 'Admin';
-          } else if (currentUser?.email == _demoStaffEmail) {
+          } else if (email == _demoStaffEmail) {
             _cachedRole = 'Staff';
           }
         }
@@ -208,13 +205,14 @@ class AuthService extends ChangeNotifier {
   // Actions
   // ---------------------------------------------------------------------------
 
-  /// Update user's role in the `users` Firestore collection (Admin action).
+  /// Update user's role in the `users` table (Admin action).
   Future<void> updateUserRole(String targetUserId, String newRole) async {
     final formattedRole = newRole.toLowerCase();
-    await _db
-        .collection('users')
-        .doc(targetUserId)
-        .update({'role': formattedRole}).timeout(const Duration(seconds: 8));
+    await _client
+        .from('users')
+        .update({'role': formattedRole})
+        .eq('id', targetUserId)
+        .timeout(const Duration(seconds: 8));
     if (targetUserId == userId) {
       _cachedRole =
           formattedRole[0].toUpperCase() + formattedRole.substring(1);
@@ -230,31 +228,31 @@ class AuthService extends ChangeNotifier {
   Future<void> updateProfile({required String fullName}) async {
     final uid = userId;
     if (uid != null) {
-      // 1. Update Firebase Auth display name
-      await currentUser!
-          .updateDisplayName(fullName)
-          .timeout(const Duration(seconds: 8));
-      // 2. Update Firestore users document
-      await _db.collection('users').doc(uid).set({
+      // 1. Update Supabase Auth user metadata
+      await _client.auth.updateUser(
+        UserAttributes(data: {'full_name': fullName}),
+      ).timeout(const Duration(seconds: 8));
+      // 2. Update users table
+      await _client.from('users').upsert({
+        'id': uid,
         'full_name': fullName,
         'email': email,
         'role': (_cachedRole ?? 'Staff').toLowerCase(),
-      }, SetOptions(merge: true)).timeout(const Duration(seconds: 8));
+      }).timeout(const Duration(seconds: 8));
       notifyListeners();
     }
   }
 
   /// Update user password.
   Future<void> updatePassword(String newPassword) async {
-    await currentUser!
-        .updatePassword(newPassword)
-        .timeout(const Duration(seconds: 8));
+    await _client.auth.updateUser(
+      UserAttributes(password: newPassword),
+    ).timeout(const Duration(seconds: 8));
   }
 
   /// Create a new account with email, password and a display name.
-  /// Also inserts a document into the `users` Firestore collection.
-  /// New users get 'staff' role by default (or 'admin' if they're the first user).
-  Future<UserCredential> signUp({
+  /// Also inserts/upserts a row into the `users` table.
+  Future<AuthResponse> signUp({
     required String email,
     required String password,
     required String fullName,
@@ -262,34 +260,28 @@ class AuthService extends ChangeNotifier {
   }) async {
     _resetRole();
 
-    final credential = await _auth.createUserWithEmailAndPassword(
+    final response = await _client.auth.signUp(
       email: email,
       password: password,
+      data: {'full_name': fullName},
     );
 
-    final user = credential.user;
+    final user = response.user;
     if (user != null) {
-      // Set display name in Firebase Auth
-      try {
-        await user.updateDisplayName(fullName);
-      } catch (e) {
-        debugPrint('[AuthService] Could not update display name: $e');
-      }
-
       String assignedRole = role.toLowerCase().trim();
-      if (assignedRole.isEmpty) {
-        assignedRole = 'staff';
-      }
+      if (assignedRole.isEmpty) assignedRole = 'staff';
 
-      // Insert user profile in Firestore
+      // The DB trigger auto-inserts the user row, but we upsert to set role
       try {
-        await _db.collection('users').doc(user.uid).set({
+        await _client.from('users').upsert({
+          'id': user.id,
           'full_name': fullName,
           'email': email,
           'role': assignedRole,
-          'created_at': FieldValue.serverTimestamp(),
-        });
-        final formatted = assignedRole[0].toUpperCase() + assignedRole.substring(1).toLowerCase();
+        }).timeout(const Duration(seconds: 8));
+
+        final formatted = assignedRole[0].toUpperCase() +
+            assignedRole.substring(1).toLowerCase();
         _cachedRole = formatted;
         try {
           final prefs = await SharedPreferences.getInstance();
@@ -304,22 +296,22 @@ class AuthService extends ChangeNotifier {
       notifyListeners();
     }
 
-    return credential;
+    return response;
   }
 
-
   /// Sign in with email & password.
-  Future<UserCredential> signIn({
+  Future<AuthResponse> signIn({
     required String email,
     required String password,
   }) async {
     _resetRole();
 
-    final credential = await _auth
-        .signInWithEmailAndPassword(email: email, password: password)
-        .timeout(const Duration(seconds: 10));
+    final response = await _client.auth.signInWithPassword(
+      email: email,
+      password: password,
+    ).timeout(const Duration(seconds: 10));
 
-    if (credential.user != null) {
+    if (response.user != null) {
       try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt(
@@ -328,7 +320,7 @@ class AuthService extends ChangeNotifier {
       await fetchUserRole(forceRefresh: true);
     }
 
-    return credential;
+    return response;
   }
 
   /// End the current session.
@@ -340,14 +332,12 @@ class AuthService extends ChangeNotifier {
       await prefs.remove(_kCachedRole);
     } catch (_) {}
     try {
-      await _auth.signOut().timeout(const Duration(seconds: 5));
+      await _client.auth.signOut().timeout(const Duration(seconds: 5));
     } catch (e) {
       debugPrint('[AuthService] signOut error: $e');
     }
     _resetRole();
 
-    // Pop all pushed routes back to the root AuthGate, ensuring any pushed
-    // screens (like MainLayoutScreen, dialogs, drawers) are fully dismissed.
     NavigationService.popToRoot();
   }
 
@@ -362,34 +352,20 @@ class AuthService extends ChangeNotifier {
 
   /// Sign in as a demo account. Auto-creates the account if it doesn't exist.
   Future<void> signInDemo({required String role}) async {
-    final email = role == 'admin' ? _demoAdminEmail : _demoStaffEmail;
-    final password = role == 'admin' ? _demoAdminPassword : _demoStaffPassword;
+    final demoEmail = role == 'admin' ? _demoAdminEmail : _demoStaffEmail;
+    final demoPassword =
+        role == 'admin' ? _demoAdminPassword : _demoStaffPassword;
     try {
-      await signIn(email: email, password: password);
-    } on FirebaseAuthException catch (e) {
-      // Firebase newer SDK returns 'invalid-credential' for both "no user" and
-      // "wrong password". We treat it as "account may not exist" and try to
-      // create it. If it already exists, we catch email-already-in-use and
-      // re-attempt sign-in (handles edge cases like stale passwords).
-      if (e.code == 'user-not-found' ||
-          e.code == 'invalid-credential' ||
-          e.code == 'INVALID_LOGIN_CREDENTIALS' ||
-          e.code == 'wrong-password') {
-        try {
-          await _createDemoAccount(email: email, password: password, role: role);
-        } on FirebaseAuthException catch (createError) {
-          if (createError.code == 'email-already-in-use') {
-            // Account exists — force delete and recreate isn't an option,
-            // so we surface a friendly error instead.
-            throw FirebaseAuthException(
-              code: 'demo-sign-in-failed',
-              message:
-                  'Demo account exists but could not be signed into. '
-                  'Please try again or contact support.',
-            );
-          }
-          rethrow;
-        }
+      await signIn(email: demoEmail, password: demoPassword);
+    } on AuthException catch (e) {
+      final msg = e.message.toLowerCase();
+      if (msg.contains('invalid') || msg.contains('not found')) {
+        await _createDemoAccount(
+            email: demoEmail, password: demoPassword, role: role);
+      } else if (msg.contains('not confirmed') || msg.contains('unconfirmed')) {
+        throw const AuthException(
+          'Demo account email is not confirmed in Supabase. Please run the Demo Accounts SQL script in your Supabase SQL editor.',
+        );
       } else {
         rethrow;
       }
@@ -402,41 +378,63 @@ class AuthService extends ChangeNotifier {
     required String role,
   }) async {
     _resetRole();
-    final credential = await _auth.createUserWithEmailAndPassword(
-        email: email, password: password);
-    final user = credential.user;
-    if (user == null) return;
-    final fullName = role == 'admin' ? 'Demo Admin' : 'Demo Staff';
     try {
-      await user.updateDisplayName(fullName);
-    } catch (_) {}
-    await _db.collection('users').doc(user.uid).set({
-      'full_name': fullName,
-      'email': email,
-      'role': role,
-      'created_at': FieldValue.serverTimestamp(),
-      'is_demo': true,
-    });
-    _cachedRole = role == 'admin' ? 'Admin' : 'Staff';
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(
-          _kSessionLoginTime, DateTime.now().millisecondsSinceEpoch);
-      await prefs.setString(_kCachedRole, _cachedRole!);
-    } catch (_) {}
-    notifyListeners();
+      final response = await _client.auth.signUp(
+        email: email,
+        password: password,
+        data: {'full_name': role == 'admin' ? 'Demo Admin' : 'Demo Staff'},
+      );
+      final user = response.user;
+      if (user == null) {
+        throw const AuthException(
+          'Could not create demo account. Please run the Demo Accounts SQL script in your Supabase SQL editor.',
+        );
+      }
+
+      if (response.session != null) {
+        final fullName = role == 'admin' ? 'Demo Admin' : 'Demo Staff';
+        try {
+          await _client.from('users').upsert({
+            'id': user.id,
+            'full_name': fullName,
+            'email': email,
+            'role': role,
+            'is_demo': true,
+          }).timeout(const Duration(seconds: 8));
+        } catch (e) {
+          debugPrint('[AuthService] Demo user profile upsert error: $e');
+        }
+        _cachedRole = role == 'admin' ? 'Admin' : 'Staff';
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setInt(
+              _kSessionLoginTime, DateTime.now().millisecondsSinceEpoch);
+          await prefs.setString(_kCachedRole, _cachedRole!);
+        } catch (_) {}
+        notifyListeners();
+      } else {
+        throw const AuthException(
+          'Email confirmation is enabled in your Supabase project. '
+          'Please run the Demo Accounts SQL script in your Supabase SQL editor to create pre-confirmed demo accounts, or disable "Confirm email" under Authentication -> Providers -> Email.',
+        );
+      }
+    } on AuthException catch (e) {
+      final msg = e.message.toLowerCase();
+      if (msg.contains('rate limit')) {
+        throw const AuthException(
+          'Supabase email rate limit exceeded. Please run the Demo Accounts SQL script in the Supabase SQL editor (or disable "Confirm email" in Supabase Auth settings).',
+        );
+      }
+      rethrow;
+    }
   }
 
-  /// Fetch all users from Firestore (admin usage).
+  /// Fetch all users from the `users` table (admin usage).
   Future<List<Map<String, dynamic>>> getAllUsers() async {
-    final snap = await _db
-        .collection('users')
-        .get()
+    final data = await _client
+        .from('users')
+        .select()
         .timeout(const Duration(seconds: 10));
-    return snap.docs.map((doc) {
-      final data = Map<String, dynamic>.from(doc.data());
-      data['id'] = doc.id;
-      return data;
-    }).toList();
+    return List<Map<String, dynamic>>.from(data as List);
   }
 }

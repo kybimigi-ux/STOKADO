@@ -1,29 +1,32 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'transaction_item.dart';
 
 class Transaction {
-  final String? id; // Firestore document ID
+  final String? id;
+  final String? hardwareId;
   final String billNo;
   final String type; // 'Receive' or 'Release'
   final double totalItems;
+  final double totalPrice;
   final String? remarks;
   final String? issuedTo;
   final String? createdBy; // UID of the user
-  final String? createdByName; // resolved from users collection
+  final String? createdByName; // resolved from users table
   final DateTime? createdAt;
   final List<TransactionItem> items;
 
   /// Set only for transactions that were queued while offline.
   final String? localId;
 
-  /// True until this transaction is confirmed to have reached Firestore.
+  /// True until this transaction is confirmed to have reached the server.
   final bool isPendingSync;
 
   const Transaction({
     this.id,
+    this.hardwareId,
     required this.billNo,
     required this.type,
     this.totalItems = 0.0,
+    this.totalPrice = 0.0,
     this.remarks,
     this.issuedTo,
     this.createdBy,
@@ -54,28 +57,27 @@ class Transaction {
 
     DateTime? parsedDate;
     final rawDate = json['created_at'];
-    if (rawDate is Timestamp) {
-      parsedDate = rawDate.toDate();
-    } else if (rawDate is String) {
+    if (rawDate is String) {
       parsedDate = DateTime.tryParse(rawDate);
     } else if (rawDate is DateTime) {
       parsedDate = rawDate;
     }
 
-    double parsedTotalItems = 0.0;
-    if (json['total_items'] is num) {
-      parsedTotalItems = (json['total_items'] as num).toDouble();
-    } else if (json['total_items'] is String) {
-      parsedTotalItems =
-          double.tryParse((json['total_items'] as String).replaceAll(',', '.')) ??
-              0.0;
+    double parseNum(dynamic val) {
+      if (val is num) return val.toDouble();
+      if (val is String) {
+        return double.tryParse(val.replaceAll(',', '.')) ?? 0.0;
+      }
+      return 0.0;
     }
 
     return Transaction(
       id: json['id']?.toString(),
+      hardwareId: json['hardware_id']?.toString(),
       billNo: json['bill_no']?.toString() ?? '',
       type: json['type']?.toString() ?? 'Receive',
-      totalItems: parsedTotalItems,
+      totalItems: parseNum(json['total_items']),
+      totalPrice: parseNum(json['total_price']),
       remarks: json['remarks']?.toString(),
       issuedTo: json['issued_to']?.toString(),
       createdBy: json['created_by']?.toString(),
@@ -87,12 +89,6 @@ class Transaction {
     );
   }
 
-  factory Transaction.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    data['id'] = doc.id;
-    return Transaction.fromJson(data);
-  }
-
   /// Formatted string representing totalItems without unnecessary trailing zeroes.
   String get formattedTotalItems {
     if (totalItems % 1 == 0) {
@@ -101,12 +97,21 @@ class Transaction {
     return totalItems.toString().replaceAll(RegExp(r'([.]*0)(?!.*\d)'), '');
   }
 
-  Map<String, dynamic> toInsertJson() {
+  /// Formatted total price.
+  String get formattedTotalPrice {
+    if (totalPrice == 0) return '—';
+    if (totalPrice % 1 == 0) return totalPrice.toInt().toString();
+    return totalPrice.toStringAsFixed(2);
+  }
+
+  Map<String, dynamic> toInsertJson({String? hardwareId}) {
     return {
+      if (hardwareId != null) 'hardware_id': hardwareId,
       'bill_no': billNo,
       'type': type,
       'status': 'Completed',
       'total_items': totalItems,
+      'total_price': totalPrice,
       if (remarks != null && remarks!.isNotEmpty) 'remarks': remarks,
       if (createdBy != null) 'created_by': createdBy,
     };
