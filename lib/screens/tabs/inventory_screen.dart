@@ -759,7 +759,8 @@ class _ProductTable extends StatelessWidget {
   Widget _buildMobileList() {
     return Column(
       children: products.map((p) {
-        final hasImage = p.imageUrl != null && p.imageUrl!.isNotEmpty;
+        final hasImage =
+            p.imageUrl != null && p.imageUrl!.trim().isNotEmpty;
         return Column(
           children: [
             InkWell(
@@ -777,7 +778,7 @@ class _ProductTable extends StatelessWidget {
                         height: _thumbSize,
                         color: AppColors.neutralSoft,
                         child: hasImage
-                            ? Image.network(p.imageUrl!,
+                            ? Image.network(p.imageUrl!.trim(),
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => const Icon(
                                     Icons.inventory_2_outlined,
@@ -907,7 +908,8 @@ class _ProductTable extends StatelessWidget {
           const Divider(height: 1, color: AppColors.border),
           // Data rows
           ...products.map((p) {
-            final hasImage = p.imageUrl != null && p.imageUrl!.isNotEmpty;
+            final hasImage =
+                p.imageUrl != null && p.imageUrl!.trim().isNotEmpty;
             return Column(
               children: [
                 InkWell(
@@ -926,7 +928,7 @@ class _ProductTable extends StatelessWidget {
                             height: _thumbSize,
                             color: AppColors.neutralSoft,
                             child: hasImage
-                                ? Image.network(p.imageUrl!,
+                                ? Image.network(p.imageUrl!.trim(),
                                     fit: BoxFit.cover,
                                     errorBuilder: (_, __, ___) =>
                                         const Icon(Icons.inventory_2_outlined,

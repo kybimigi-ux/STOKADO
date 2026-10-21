@@ -82,8 +82,13 @@ class ProductService {
           .single();
       return Product.fromJson(data);
     } on PostgrestException catch (pe) {
-      if (pe.code == 'PGRST204' && pe.message.contains('image_url')) {
-        debugPrint('[ProductService] image_url column missing in schema cache, retrying insert without image_url...');
+      final isMissingImageUrl = (pe.code == 'PGRST204' || pe.code == '42703') &&
+          pe.message.toLowerCase().contains('image_url');
+      if (isMissingImageUrl) {
+        debugPrint(
+            '[ProductService] WARNING: "image_url" column does not exist on "products" table in Supabase. '
+            'Falling back to insert without image_url. '
+            'To fix, run in Supabase SQL Editor: ALTER TABLE public.products ADD COLUMN IF NOT EXISTS image_url text DEFAULT null;');
         final fallbackPayload = Map<String, dynamic>.from(payload)..remove('image_url');
         final data = await _client
             .from('products')
@@ -111,8 +116,13 @@ class ProductService {
           .eq('id', id)
           .eq('hardware_id', hwId);
     } on PostgrestException catch (pe) {
-      if (pe.code == 'PGRST204' && pe.message.contains('image_url')) {
-        debugPrint('[ProductService] image_url column missing in schema cache, retrying update without image_url...');
+      final isMissingImageUrl = (pe.code == 'PGRST204' || pe.code == '42703') &&
+          pe.message.toLowerCase().contains('image_url');
+      if (isMissingImageUrl) {
+        debugPrint(
+            '[ProductService] WARNING: "image_url" column does not exist on "products" table in Supabase. '
+            'Falling back to update without image_url. '
+            'To fix, run in Supabase SQL Editor: ALTER TABLE public.products ADD COLUMN IF NOT EXISTS image_url text DEFAULT null;');
         final fallbackData = Map<String, dynamic>.from(cleanData)..remove('image_url');
         await _client
             .from('products')

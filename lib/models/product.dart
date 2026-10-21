@@ -97,7 +97,8 @@ class Product {
       'cost_price': costPrice,
       'is_active': isActive,
       if (remarks != null && remarks!.isNotEmpty) 'remarks': remarks,
-      if (imageUrl != null && imageUrl!.isNotEmpty) 'image_url': imageUrl,
+      if (imageUrl != null && imageUrl!.trim().isNotEmpty)
+        'image_url': imageUrl!.trim(),
     };
   }
 
